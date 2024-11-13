@@ -1,9 +1,9 @@
 import streamlit as st
 from PIL import Image
-import cv2
-import numpy as np
 import io
 import base64
+import numpy as np
+import cv2
 
 # 画像加工関数
 def process_image(image, mode):
@@ -26,7 +26,7 @@ def process_image(image, mode):
         gray_img = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
         return Image.fromarray(gray_img)
 
-# JavaScriptでカメラを起動して写真を撮影
+# JavaScriptでカメラを操作する関数
 def webcam_photo_widget():
     photo_widget_code = """
     <div>
@@ -48,18 +48,24 @@ def webcam_photo_widget():
                 canvas.height = video.videoHeight;
                 context.drawImage(video, 0, 0, canvas.width, canvas.height);
                 const dataURL = canvas.toDataURL('image/png');
-                fetch("/save_photo", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ image: dataURL })
-                });
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'image_data';
+                input.value = dataURL;
+                document.body.appendChild(input);
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = '';
+                form.appendChild(input);
+                document.body.appendChild(form);
+                form.submit();
             });
         </script>
     </div>
     """
     return photo_widget_code
 
-# アップロードまたは撮影された画像を取得する
+# Streamlitアプリ
 st.title("写真撮影＆加工ツール")
 
 uploaded_image = None
@@ -72,9 +78,17 @@ if uploaded_file is not None:
     st.image(uploaded_image, caption="アップロードされた写真", use_column_width=True)
 
 # カメラセクション
-st.header("カメラを使用して写真を撮影")
+st.header("カメラで写真を撮影")
 photo_widget_html = webcam_photo_widget()
 st.components.v1.html(photo_widget_html, height=350)
+
+# 撮影データの取得
+if "image_data" in st.session_state:
+    image_data = st.session_state["image_data"]
+    image_data = image_data.split(",")[1]
+    decoded_data = base64.b64decode(image_data)
+    uploaded_image = Image.open(io.BytesIO(decoded_data))
+    st.image(uploaded_image, caption="撮影した写真", use_column_width=True)
 
 # 画像加工とダウンロード
 if uploaded_image is not None:
@@ -97,4 +111,4 @@ if uploaded_image is not None:
             mime="image/png",
         )
 else:
-    st.info("写真をアップロードするか、撮影してください")
+    st.info("写真をアップロードするか、カメラで撮影してください")
