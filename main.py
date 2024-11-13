@@ -1,14 +1,14 @@
 import streamlit as st
-from PIL import Image, ImageEnhance
-import numpy as np
+from PIL import Image
 import cv2
-import io
+import numpy as np
 from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
+import io
 
 # 撮影されたフレームを保存する変数
 captured_frame = None
 
-# フレームを処理するクラス
+# カメラ映像をキャプチャするクラス
 class VideoTransformer(VideoTransformerBase):
     def transform(self, frame):
         global captured_frame
@@ -36,51 +36,56 @@ def process_image(image, mode):
         gray_img = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
         return Image.fromarray(gray_img)
 
-# Streamlitアプリの構築
+# ダウンロードリンク生成
+def generate_download_button(processed_image, label):
+    buf = io.BytesIO()
+    processed_image.save(buf, format="PNG")
+    byte_im = buf.getvalue()
+    st.download_button(
+        label=f"{label}をダウンロード",
+        data=byte_im,
+        file_name=f"{label}.png",
+        mime="image/png",
+    )
+
+# Streamlitアプリ
+st.set_page_config(page_title="写真編集ツール", layout="wide")
+
 st.title("写真撮影＆加工ツール")
 
-# 写真の撮影またはアップロード
-st.header("写真をアップロードまたは撮影してください")
+# タブで操作を切り替え
+tab1, tab2 = st.tabs(["写真をアップロード", "カメラで撮影"])
 
-tab1, tab2 = st.tabs(["📤 写真をアップロード", "📷 カメラで撮影"])
+uploaded_image = None
 
 # アップロードタブ
 with tab1:
-    uploaded_file = st.file_uploader("写真を選択してください", type=["jpg", "jpeg", "png"])
+    uploaded_file = st.file_uploader("写真をアップロードしてください", type=["jpg", "jpeg", "png"])
     if uploaded_file is not None:
-        image = Image.open(uploaded_file)
+        uploaded_image = Image.open(uploaded_file)
+        st.image(uploaded_image, caption="アップロードされた写真", use_column_width=True)
 
-# 撮影タブ
+# カメラタブ
 with tab2:
-    st.write("カメラを使用して写真を撮影")
     webrtc_streamer(key="camera", video_transformer_factory=VideoTransformer)
-    if st.button("📸 撮影する"):
+    if st.button("撮影する"):
         if captured_frame is not None:
-            image = Image.fromarray(cv2.cvtColor(captured_frame, cv2.COLOR_BGR2RGB))
+            captured_image = Image.fromarray(cv2.cvtColor(captured_frame, cv2.COLOR_BGR2RGB))
+            uploaded_image = captured_image
+            st.image(uploaded_image, caption="撮影した写真", use_column_width=True)
         else:
-            st.warning("カメラの映像がキャプチャできませんでした")
+            st.warning("カメラから映像が取得できませんでした")
 
-# 加工とダウンロード
-if 'image' in locals():
+# 画像加工とダウンロード
+if uploaded_image is not None:
     st.header("加工オプション")
     options = ["無加工", "逆光補正", "シャープ強め", "グレースケール"]
-    processed_images = {}
 
-    for option in options:
-        st.subheader(option)
-        processed_image = process_image(image, option)
-        processed_images[option] = processed_image
-        st.image(processed_image, caption=option, use_column_width=True)
-
-        # ダウンロードボタン
-        buf = io.BytesIO()
-        processed_image.save(buf, format="PNG")
-        byte_im = buf.getvalue()
-        st.download_button(
-            label=f"{option}をダウンロード",
-            data=byte_im,
-            file_name=f"{option}.png",
-            mime="image/png",
-        )
+    col1, col2 = st.columns(2)
+    for index, option in enumerate(options):
+        with col1 if index % 2 == 0 else col2:
+            processed_image = process_image(uploaded_image, option)
+            st.image(processed_image, caption=option, use_column_width=True)
+            generate_download_button(processed_image, option)
 else:
-    st.info("写真をアップロードまたは撮影してください")
+    st.info("写真をアップロードするか、カメラで撮影してください")
