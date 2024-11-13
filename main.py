@@ -2,18 +2,8 @@ import streamlit as st
 from PIL import Image
 import cv2
 import numpy as np
-from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 import io
-
-# 撮影されたフレームを保存する変数
-captured_frame = None
-
-# カメラ映像をキャプチャするクラス
-class VideoTransformer(VideoTransformerBase):
-    def transform(self, frame):
-        global captured_frame
-        captured_frame = frame.to_ndarray(format="bgr24")
-        return captured_frame
+import base64
 
 # 画像加工関数
 def process_image(image, mode):
@@ -36,56 +26,75 @@ def process_image(image, mode):
         gray_img = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
         return Image.fromarray(gray_img)
 
-# ダウンロードリンク生成
-def generate_download_button(processed_image, label):
-    buf = io.BytesIO()
-    processed_image.save(buf, format="PNG")
-    byte_im = buf.getvalue()
-    st.download_button(
-        label=f"{label}をダウンロード",
-        data=byte_im,
-        file_name=f"{label}.png",
-        mime="image/png",
-    )
+# JavaScriptでカメラを起動して写真を撮影
+def webcam_photo_widget():
+    photo_widget_code = """
+    <div>
+        <video id="video" width="100%" autoplay></video>
+        <button id="snap" style="margin-top: 10px;">撮影</button>
+        <canvas id="canvas" style="display: none;"></canvas>
+        <script>
+            const video = document.getElementById('video');
+            const canvas = document.getElementById('canvas');
+            const snap = document.getElementById('snap');
+            const context = canvas.getContext('2d');
+            navigator.mediaDevices.getUserMedia({ video: true })
+                .then((stream) => {
+                    video.srcObject = stream;
+                });
 
-# Streamlitアプリ
-st.set_page_config(page_title="写真編集ツール", layout="wide")
+            snap.addEventListener('click', () => {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                const dataURL = canvas.toDataURL('image/png');
+                fetch("/save_photo", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ image: dataURL })
+                });
+            });
+        </script>
+    </div>
+    """
+    return photo_widget_code
 
+# アップロードまたは撮影された画像を取得する
 st.title("写真撮影＆加工ツール")
-
-# タブで操作を切り替え
-tab1, tab2 = st.tabs(["写真をアップロード", "カメラで撮影"])
 
 uploaded_image = None
 
-# アップロードタブ
-with tab1:
-    uploaded_file = st.file_uploader("写真をアップロードしてください", type=["jpg", "jpeg", "png"])
-    if uploaded_file is not None:
-        uploaded_image = Image.open(uploaded_file)
-        st.image(uploaded_image, caption="アップロードされた写真", use_column_width=True)
+# アップロードセクション
+st.header("写真をアップロードする")
+uploaded_file = st.file_uploader("写真を選択してください", type=["jpg", "jpeg", "png"])
+if uploaded_file is not None:
+    uploaded_image = Image.open(uploaded_file)
+    st.image(uploaded_image, caption="アップロードされた写真", use_column_width=True)
 
-# カメラタブ
-with tab2:
-    webrtc_streamer(key="camera", video_transformer_factory=VideoTransformer)
-    if st.button("撮影する"):
-        if captured_frame is not None:
-            captured_image = Image.fromarray(cv2.cvtColor(captured_frame, cv2.COLOR_BGR2RGB))
-            uploaded_image = captured_image
-            st.image(uploaded_image, caption="撮影した写真", use_column_width=True)
-        else:
-            st.warning("カメラから映像が取得できませんでした")
+# カメラセクション
+st.header("カメラを使用して写真を撮影")
+photo_widget_html = webcam_photo_widget()
+st.components.v1.html(photo_widget_html, height=350)
 
 # 画像加工とダウンロード
 if uploaded_image is not None:
     st.header("加工オプション")
     options = ["無加工", "逆光補正", "シャープ強め", "グレースケール"]
 
-    col1, col2 = st.columns(2)
-    for index, option in enumerate(options):
-        with col1 if index % 2 == 0 else col2:
-            processed_image = process_image(uploaded_image, option)
-            st.image(processed_image, caption=option, use_column_width=True)
-            generate_download_button(processed_image, option)
+    for option in options:
+        st.subheader(option)
+        processed_image = process_image(uploaded_image, option)
+        st.image(processed_image, caption=option, use_column_width=True)
+
+        # ダウンロードボタン
+        buf = io.BytesIO()
+        processed_image.save(buf, format="PNG")
+        byte_im = buf.getvalue()
+        st.download_button(
+            label=f"{option}をダウンロード",
+            data=byte_im,
+            file_name=f"{option}.png",
+            mime="image/png",
+        )
 else:
-    st.info("写真をアップロードするか、カメラで撮影してください")
+    st.info("写真をアップロードするか、撮影してください")
